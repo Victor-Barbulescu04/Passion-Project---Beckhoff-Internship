@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Name>Drive Manager 2</Name>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{e3d893e4-4d7c-4395-96a8-89e356f2caf9}</ProjectGuid>
+    <TcPath>
+    </TcPath>
+    <AssemblyName>Drive Manager</AssemblyName>
+    <RootNamespace>Drive Manager</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="Term 7 %28ELM7222-9016%29.tcdmdrv">
+      <SubType>Content</SubType>
+    </Content>
+  </ItemGroup>
+</Project>
