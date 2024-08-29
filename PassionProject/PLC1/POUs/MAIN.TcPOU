@@ -1,0 +1,236 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">
+  <POU Name="MAIN" Id="{598acc54-b837-4c2d-b237-f312aa6613cc}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR
+	// ------------------------------------------- //
+	// Outputs
+	bLight_GPBL1 AT %Q* 	: 	BOOL;
+	bLight_GSSL1 AT %Q* 	: 	BOOL;
+	
+	// ------------------------------------------- //
+	// Motion
+	bLimitSwitchPower AT %Q*:	BOOL := TRUE;
+	
+	// ------------------------------------------- //
+	// Indicators
+	fbBlink : FB_Flash;
+	
+	// -------------------------------------------------------------------------------------- //
+	// Vision
+	bRingLight AT %Q*		:	BOOL := TRUE;
+	hr						:	HRESULT;
+	fbCamera 				:	FB_VN_GevCameraControl;
+	eState 					: 	EtcVNCameraState;
+	
+	// Raw Input
+	ipImageIn 				: 	ITcVnImage;
+	
+	// ------------------------------------------- //
+	// Colors
+	
+	// Colored output to perform processing on
+	ipImageWork 			: 	ITcVnImage;
+	ipImageWorkDisp 		: 	ITcVnDisplayableImage;
+	
+	// Color maps to black and white output
+	// ** Could also check for ranges [0,0,0] to [199,255,255] to go straight to proper color map **
+	ipImageColorMap_White 	: 	ITcVnImage;
+	aColorLow_White 		: 	TcVnVector4_LREAL := [199,255,255];
+	aColorHigh_White 		: 	TcVnVector4_LREAL := [255,255,255];
+	
+	// Invert image so that objects are white and background is black
+	ipImageColorMap_Black	: 	ITcVnImage;
+	ipImageColorMapDisp_Black : ITcVnDisplayableImage;
+	
+	// Processed Output
+	ipImageResult 			:	ITcVnImage;
+	ipImageResultDisp 		: 	ITcVnDisplayableImage;
+	
+	
+	// ------------------------------------------- //
+	// Contours
+	
+	ipContourList 			: 	ITcVnContainer;				// Container of containers containing points for contours
+	ipContourListIterator	: 	ITcVnForwardIterator;		// Used to dynamically iterate through ContourList
+	ipContour				: 	ITcVnContainer;				// A single contour
+	
+	aColor_Green			: 	TcVnVector4_LREAL := [0,255,0]; // Constant value, color of drawn contours
+	
+	// ------------------------------------------- //
+	// Object Detection
+	
+	// Load Reference FIles
+	bFilesRead				: 	BOOL := FALSE;
+	fbReadReferenceShapeFiles : FB_ReadReferenceShapeXMLFiles;
+		
+	ipReference_Triangle	: 	ITcVnContainer;				// Destination container for our triangle	
+	ipReference_Circle		: 	ITcVnContainer;				// Destination container for our circle
+	ipReference_Square		: 	ITcVnContainer;				// Destination container for our square																		
+	
+	// Calculate area and dissimilarity to determine correct shape type
+	fArea					: 	LREAL;						// Area of found contours
+	
+	fTriangleDissimilarity	: 	LREAL;						// Dissimilarity between reference triangle and actual images
+	fCircleDissimilarity	: 	LREAL;						// Dissimilarity between reference circle and actual images
+	fSquareDissimilarity	: 	LREAL;						// Dissimilarity between reference square and actual images
+	fMinimumDissimilarity	: 	LREAL;						
+	
+	sText					:	STRING(256);				// Text label on contour
+	aCenter					:	TcVnPoint2_LREAL;			// Center of mass of contour
+	
+	iShape					: 	E_SHAPES := -1;				// Detected shape to be sent to PositionStateMachine
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[_AppInfo.KeepOutputsOnBP := TRUE;
+
+// Safety Handling
+Safety.bSafetyRestart := IO.bInAckSignal;
+Safety.bErrorAck := IO.bInAckSignal;
+Safety.bSafetyRun := IO.bInSafetyRunSwitch; // ** HARDWIRED TO TRUE **
+
+// Indicators
+bLight_GPBL1 := IO.bInAckSignal;
+bLight_GSSL1 := IO.bInSafetyRunSwitch;
+
+fbBlink(bEnable:= NOT IO.bInEStopSignal, tTimeOn:= T#500MS, tTimeOff:= T#500MS, bPulse=> IO.bOutEStopIndicator);
+
+// -------------------------------------------------------------------------------------- //
+// Vision
+	
+// Read in reference image files
+IF NOT bFilesRead THEN
+	fbReadReferenceShapeFiles(
+		ipReference_Triangle => ipReference_Triangle,
+		ipReference_Circle => ipReference_Circle,
+		ipReference_Square => ipReference_Square
+	);
+	
+	bFilesRead := fbReadReferenceShapeFiles.bAllFilesLoaded;
+END_IF
+
+IF bFilesRead THEN
+	eState := fbCamera.GetState();
+	hr := S_OK;
+		
+	IF eState <= TCVN_CS_ERROR THEN // If state is in error, attempt reset
+		hr := fbCamera.Reset();
+	ELSIF eState < TCVN_CS_ACQUIRING THEN
+		hr := fbCamera.StartAcquisition();
+	ELSIF eState = TCVN_CS_ACQUIRING THEN
+		// Get current image and set ROI
+		hr := fbCamera.GetCurrentImage(ipImageIn);
+		//hr := F_VN_SetRoi(953, 480, 450, 370, ipImageIn, hr); 
+			
+		// Check if image was successfully recieved
+		IF SUCCEEDED(hr) AND ipImageIn <> 0 THEN
+			// Color Detection
+		
+			// Create working colored image and displayable version
+			hr := F_VN_ConvertColorSpace(ipImageIn, ipImageWork,TCVN_CST_BAYER_RG_TO_RGB, hr);
+			hr := F_VN_CopyIntoDisplayableImage(ipImageWork, ipImageWorkDisp, hr);
+			
+			// Copy our work image into final image for later use during contour drawing
+			hr := F_VN_CopyImage(ipImageWork, ipImageResult, hr);
+			
+			// Increase contrast by converting anything that isn't pure white to black
+			// This creates a white image with black shapes on it
+			hr := F_VN_CheckColorRange(ipImageWork, ipImageColorMap_White, aColorLow_White, aColorHigh_White, hr);
+			
+			// Invert white color map to a black color map 
+			// This creates a black image with white shapes on it
+			hr := F_VN_InvertImageColor(ipImageColorMap_White, ipImageColorMap_Black, hr);
+			hr := F_VN_CopyIntoDisplayableImage(ipImageColorMap_Black, ipImageColorMapDisp_Black,hr);
+			
+			// ------------------------------------------- //
+			// Contours
+			
+			// Use color map to find contours
+			hr := F_VN_FindContours(ipImageColorMap_Black, ipContourList,hr);
+			
+			
+			// ** DELETE WHEN ALL REFERENCES CREATED **
+			// Count the number of contours and store in iContourSize
+			// Write points to XML file
+			hr := F_VN_GetForwardIterator(ipContourList, ipContourListIterator, hr);
+		
+			// Evaluate each subcontainer for contour points
+			WHILE SUCCEEDED(hr) AND_THEN ipContourListIterator.CheckIfEnd() <> S_OK DO
+				hr := F_VN_GetContainer(ipContourListIterator, ipContour, hr);
+				hr := F_VN_IncrementIterator(ipContourListIterator, hr);
+				
+				// Draw contours
+				hr := F_VN_DrawContours(ipContour, -1, ipImageResult, aColor_Green, 3, hr);
+				
+				// ------------------------------------------- //
+				// Shape Detection
+				
+				// Determine area of contours to save resources scanning miscellaneous junk
+				hr := F_VN_ContourArea(ipContour, fArea, hr);
+				
+				// Compare contours to reference images and determine closest match
+				IF fArea > 10000 THEN
+					hr := F_VN_MatchContours(ipContour, ipReference_Triangle, TCVN_CMCM_CONTOURS_MATCH_I1, fTriangleDissimilarity, hr);
+					
+					IF fTriangleDissimilarity < 0.0006 THEN
+						iShape := eCircle;
+						sText := 'Circle';
+					ELSIF fTriangleDissimilarity >= 0.028 AND fTriangleDissimilarity <= 0.033 THEN
+						iShape := eSquare;
+						sText := 'Square';
+					ELSIF fTriangleDissimilarity >= 0.122 AND fTriangleDissimilarity <= 0.144 THEN
+						iShape := eTriangle;
+						sText := 'Triangle';
+					ELSE
+						iShape := eNoShape;
+						sText := 'Unknown';
+					END_IF
+				END_IF
+				
+				// Calculate center of mass and place text onto shape
+				hr := F_VN_ContourCenterOfMass(ipContour, aCenter, hr);
+				hr := F_VN_PutText(sText, ipImageResult, LREAL_TO_UDINT(aCenter[0] - 60), LREAL_TO_UDINT(aCenter[1] + 10), ETcVnFontType.TCVN_FT_HERSHEY_PLAIN, 2, aColor_Green,hr);
+			END_WHILE
+			
+			hr := F_VN_CopyIntoDisplayableImage(ipImageResult, ipImageResultDisp, hr);
+			
+		END_IF
+	END_IF
+	
+	// Call to PositionStateMachine to run motion
+	PositionStateMachine(iShape := iShape);
+END_IF
+]]></ST>
+    </Implementation>
+    <LineIds Name="MAIN">
+      <LineId Id="659" Count="1" />
+      <LineId Id="74" Count="0" />
+      <LineId Id="2" Count="0" />
+      <LineId Id="6" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="11" Count="0" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="8" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="56" Count="1" />
+      <LineId Id="41" Count="0" />
+      <LineId Id="455" Count="0" />
+      <LineId Id="454" Count="0" />
+      <LineId Id="70" Count="0" />
+      <LineId Id="177" Count="19" />
+      <LineId Id="457" Count="0" />
+      <LineId Id="197" Count="0" />
+      <LineId Id="456" Count="0" />
+      <LineId Id="198" Count="31" />
+      <LineId Id="308" Count="4" />
+      <LineId Id="314" Count="12" />
+      <LineId Id="344" Count="9" />
+      <LineId Id="371" Count="1" />
+      <LineId Id="743" Count="0" />
+      <LineId Id="354" Count="14" />
+      <LineId Id="72" Count="0" />
+      <LineId Id="553" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

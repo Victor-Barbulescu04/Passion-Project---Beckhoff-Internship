@@ -1,0 +1,308 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">
+  <POU Name="PositionStateMachine" Id="{af7cc001-d42d-402e-84cd-f188fbf2eedf}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM PositionStateMachine
+VAR_INPUT
+	iShape 					: 	INT;
+END_VAR
+VAR
+	// State Machine
+	iMotionStep 			: 	E_MotionStates;
+	iNextTargetPosition		:	E_MotionStates;
+	iResetState				: 	INT;
+	
+	// Motion
+	iRunSpeed 				: 	INT := 100;
+	iTargetPosition			:	INT;
+	bExecuteMotion			:	BOOL;
+	bRecalibrate AT %I*		:	BOOL;
+	iPosition AT %Q* 		: 	LREAL;
+	
+	fbMotorEnable 			: 	MC_Power;
+	fbMoveAbsolute 			: 	MC_MoveAbsolute;
+	fbMoveVelocity			:	MC_MoveVelocity;
+	fbSetPosition			:	MC_SetPosition;
+	fbMotorStop 			: 	MC_Stop;
+	fbMotorReset 			: 	MC_Reset;
+	fbReadPosition 			: 	MC_ReadActualPosition;
+	
+	bServoAxisError AT %I* 	: 	BOOL;
+	
+	bLimitSwitch AT %I*		:	BOOL;
+	bHandClosed AT %Q*		:	BOOL;
+	
+	// Timers
+	tHandActuationTimer		:	TON;
+	tVisionPauseTimer		:	TON;
+	bStartHandTimer			:	BOOL;
+	bStartVisionTimer		:	BOOL;
+	
+	// Vision
+	hr						:	HRESULT;
+	iNumberOfContours		:	ULINT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[Motion.Servo.ReadStatus();
+fbReadPosition(
+	Axis:= Motion.Servo, 
+	Enable:= TRUE,  
+	Position=> iPosition
+);
+
+IF bRecalibrate AND NOT fbMoveAbsolute.Busy AND NOT fbMoveVelocity.Busy AND NOT Motion.Servo.Status.Moving AND NOT Motion.Servo.Status.Error THEN
+	iMotionStep := eActivateCalibration;
+END_IF
+
+	
+CASE iMotionStep OF
+	
+	eInitialize : // Axis Ready
+	
+		fbMotorEnable(
+			Axis:= Motion.Servo, 
+			Enable:= TRUE, 
+			Enable_Positive:= TRUE, 
+			Enable_Negative:= TRUE, 
+		);
+	
+		IF fbMotorEnable.Status THEN
+			iMotionStep := eActivateCalibration;
+		END_IF
+		
+	// -------------------------------------------------- //
+		
+	eActivateCalibration : // Activate Calibration
+		bHandClosed := FALSE;
+		
+		IF bLimitSwitch THEN // Switch is not pressed, calibrate
+			fbMoveVelocity(
+				Axis:= Motion.Servo, 
+				Execute:= TRUE , 
+				Velocity:= 20, 
+				Direction:= MC_Negative_Direction, 
+			);
+			iMotionStep := eCalibrate;
+		ELSE // Switch is pressed, do not calibrate
+			fbMoveVelocity(Axis:= Motion.Servo, Execute:= FALSE);
+			fbSetPosition(Axis:= Motion.Servo, Execute:= TRUE, Position:= 0);
+			iMotionStep := eSetTargetPosition_1;
+		END_IF
+		
+		IF fbMoveAbsolute.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+	
+	// -------------------------------------------------- //
+	
+	eCalibrate : // Axis Calibrating
+		fbMoveVelocity(
+			Axis:= Motion.Servo, 
+			Execute:= FALSE , 
+		);
+		
+		IF NOT bLimitSwitch AND NOT fbMoveVelocity.Busy THEN
+			fbSetPosition(Axis:= Motion.Servo, Execute:= TRUE, Position:= 0);
+			iMotionStep := eSetTargetPosition_1;
+		ELSIF fbMoveVelocity.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+	
+	// -------------------------------------------------- //
+	
+	eSetTargetPosition_1 : // Target Position : Start (0mm)
+		iTargetPosition := 0;
+		bExecuteMotion := TRUE;
+		IF fbMoveAbsolute.Busy THEN
+			iMotionStep := eRunToPosition_1;
+		END_IF
+		
+		IF fbMoveAbsolute.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+	
+	// -------------------------------------------------- //
+	
+	eRunToPosition_1 : // Run to Target Position : Start
+		bExecuteMotion := FALSE;
+		
+		IF fbMoveAbsolute.Done AND NOT fbMoveAbsolute.Busy THEN
+			iMotionStep := eScanAndGrab;
+		ELSIF fbMoveAbsolute.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+	
+	// -------------------------------------------------- //
+	
+	eSetTargetPosition_2 : // Set Target Position : Triangle Box (90mm)
+		iTargetPosition := 90;
+		bExecuteMotion := TRUE;
+		
+		iMotionStep := eRunToPosition_2;
+		
+		IF fbMoveAbsolute.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+	
+	// -------------------------------------------------- //
+	
+	eRunToPosition_2 : // Run to Target Position : Triangle Box
+		bExecuteMotion := FALSE;
+		IF fbMoveAbsolute.Done AND NOT fbMoveAbsolute.Busy THEN
+			iMotionStep := eOpenHand;
+		ELSIF fbMoveAbsolute.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+	
+	// -------------------------------------------------- //
+	
+	eSetTargetPosition_3 : // Set Target Position : Square Box (180mm)
+		iTargetPosition := 180;
+		bExecuteMotion := TRUE;
+		IF fbMoveAbsolute.Busy THEN
+			iMotionStep := eRunToPosition_3;
+		END_IF
+		
+		IF fbMoveAbsolute.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+	
+	// -------------------------------------------------- //
+	
+	eRunToPosition_3 : // Run to Target Position : Square Box
+		bExecuteMotion := FALSE;
+		IF fbMoveAbsolute.Done AND NOT fbMoveAbsolute.Busy THEN
+			iMotionStep := eOpenHand;
+		ELSIF fbMoveAbsolute.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+	
+	// -------------------------------------------------- //
+	
+	eSetTargetPosition_4 : // Set Target Position : Circle Box (270mm)
+		iTargetPosition := 270;
+		bExecuteMotion := TRUE;
+		IF fbMoveAbsolute.Busy THEN
+			iMotionStep := eRunToPosition_4;
+		END_IF
+		
+		IF fbMoveAbsolute.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+	
+	// -------------------------------------------------- //
+	
+	eRunToPosition_4 : // Run to Target Position : Circle Box
+		bExecuteMotion := FALSE;
+		
+		IF fbMoveAbsolute.Done AND NOT fbMoveAbsolute.Busy THEN
+			iMotionStep := eOpenHand;
+		ELSIF fbMoveAbsolute.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+	
+	// -------------------------------------------------- //
+	
+	eScanAndGrab : // Scan for shape and Grab
+		hr := F_VN_GetNumberOfElements(Main.ipContourList, iNumberOfContours, hr);
+		
+		// If some object is present and it's one of our three shapes
+		IF iNumberOfContours = 1 AND iShape	<> -1 THEN
+			bStartVisionTimer := TRUE;
+			// Pause for half a second to allow camera to reliably detect object with no interference
+			IF tVisionPauseTimer.Q THEN
+				bStartVisionTimer := FALSE;
+				CASE iShape OF
+					eTriangle :
+						iNextTargetPosition := eSetTargetPosition_2;
+						iMotionStep := eCloseHand;
+					eSquare	:
+						iNextTargetPosition := eSetTargetPosition_3;
+						iMotionStep := eCloseHand;
+					eCircle	:	
+						iNextTargetPosition := eSetTargetPosition_4;
+						iMotionStep := eCloseHand;
+				END_CASE
+			END_IF
+		END_IF
+		
+		IF fbMoveAbsolute.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+		
+	// -------------------------------------------------- //
+	
+	eOpenHand : // Open hand state before axis information resets
+		bHandClosed := FALSE;
+		bStartHandTimer := TRUE;
+		IF tHandActuationTimer.Q THEN
+			bStartHandTimer := FALSE;
+			iMotionStep := eSetTargetPosition_1;
+		END_IF
+		
+		IF Motion.Servo.Status.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+		
+	// -------------------------------------------------- //
+	
+	eCloseHand : // Close hand state to prevent interference from camera
+		bHandClosed := TRUE;
+		bStartHandTimer := TRUE;	
+		IF tHandActuationTimer.Q THEN
+			bStartHandTimer := FALSE;
+			iMotionStep := iNextTargetPosition;
+		END_IF
+		
+		IF Motion.Servo.Status.Error THEN
+			iMotionStep := eErrorState1;
+		END_IF
+	
+	// -------------------------------------------------- //
+	
+	eErrorState1 : // Error State 1
+		// Disable all motion function blocks
+		fbMoveAbsolute(Axis := Motion.Servo, Execute := FALSE);
+		fbMoveVelocity(Axis := Motion.Servo, Execute := FALSE);
+		// Alternate between enable and disable reset till error clears
+		CASE iResetState OF
+			0:
+				fbMotorEnable(Axis:= Motion.Servo, Enable:= FALSE );
+				fbMotorReset(Axis := Motion.Servo, Execute := TRUE);
+				iResetState := 1;
+			1:
+				fbMotorReset(Axis := Motion.Servo, Execute := FALSE);
+				iResetState := 0;
+		END_CASE
+		
+		// If reset is successful, move to initialization state
+		IF NOT Motion.Servo.Status.Error THEN
+			iMotionStep := eInitialize;
+		END_IF
+	
+	// -------------------------------------------------- //
+END_CASE
+
+fbMoveAbsolute(
+	Axis:= Motion.Servo, 
+	Execute:= bExecuteMotion, 
+	Position:= iTargetPosition, 
+	Velocity:= iRunSpeed, 
+);
+
+tHandActuationTimer(IN:= bStartHandTimer, PT:= T#1000MS);
+tVisionPauseTimer(IN := bStartVisionTimer, PT := T#500MS); ]]></ST>
+    </Implementation>
+    <LineIds Name="PositionStateMachine">
+      <LineId Id="2343" Count="217" />
+      <LineId Id="2600" Count="0" />
+      <LineId Id="2561" Count="1" />
+      <LineId Id="2599" Count="0" />
+      <LineId Id="2563" Count="9" />
+      <LineId Id="2601" Count="0" />
+      <LineId Id="2573" Count="4" />
+      <LineId Id="2589" Count="9" />
+      <LineId Id="2180" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

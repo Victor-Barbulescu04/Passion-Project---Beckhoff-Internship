@@ -1,0 +1,48 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">
+  <DUT Name="E_MotionStates" Id="{1533ba76-6a7a-4756-abae-568fe790e9fb}">
+    <Declaration><![CDATA[//{attribute 'qualified_only'}
+{attribute 'strict'}
+TYPE E_MotionStates :
+(
+	// Initialize Motor
+	eInitialize := 0,
+	
+	// Activate Calibration
+	eActivateCalibration := 1,
+	
+	// Calibrate Position
+	eCalibrate := 2,
+	
+	// Scan for shape
+	eScanAndGrab := 3,
+	
+	// Open Hand
+	eOpenHand := 4,
+	
+	// Close Hand
+	eCloseHand := 5,
+	
+	// Position 10 : Start
+	eSetTargetPosition_1 := 10,
+	eRunToPosition_1 := 11,
+	
+	// Position 20 : Triangle Box
+	eSetTargetPosition_2 := 20,
+	eRunToPosition_2 := 21,
+	
+	// Position 30 : Square Box
+	eSetTargetPosition_3 := 30,
+	eRunToPosition_3 := 31,
+	
+	// Position 40 : Circle Box
+	eSetTargetPosition_4 := 40,
+	eRunToPosition_4 := 41,
+	
+	// Error Handling
+	eErrorState1 := 999
+);
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

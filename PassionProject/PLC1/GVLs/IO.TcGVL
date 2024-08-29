@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">
+  <GVL Name="IO" Id="{07d614c2-6b6c-4040-b381-1ded772c6aba}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL
+	// Acknowledge Error Button | Linked to GPB1
+	bInAckSignal AT %I* : BOOL;
+	// Safe to run Switch | Linked to GSS1
+	bInSafetyRunSwitch AT %I* : BOOL;
+	
+	// Signal from TwinSAFE Controller | Linked to EStopIndicator Alias
+	bInEStopSignal AT %I* : BOOL;
+	// Light up indicator | Linked to RPBL1
+	bOutEStopIndicator AT %Q* : BOOL;
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

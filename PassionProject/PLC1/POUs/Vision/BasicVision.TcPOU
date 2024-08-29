@@ -1,0 +1,67 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">
+  <POU Name="BasicVision" Id="{6e7559d5-e26c-4847-987b-a1f3e7c80c83}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM BasicVision
+VAR
+		
+	hr						:	HRESULT;
+	fbCamera 				:	FB_VN_GevCameraControl;
+	eState 					: 	EtcVNCameraState;
+	
+	// Raw Input
+	ipImageIn 				: 	ITcVnImage;
+	
+	// ------------------------------------------- //
+	// Colors
+	
+	// Colored output to perform processing on
+	ipImageWork 			: 	ITcVnImage;
+	ipImageWorkDisp 		: 	ITcVnDisplayableImage;
+	
+	// Color maps to black and white output
+	ipImageColorMap 		:	ITcVnImage;
+	ipImageColorMapDisp 	:	ITcVnDisplayableImage;
+	aColorLow_Red 			:	TcVnVector4_LREAL := [0,0,0];				// Red : [50,10,0]
+	aColorHigh_Red 			:	TcVnVector4_LREAL := [198,254,254];			// Red : [90,30,15]
+	
+	// Processed Output
+	ipImageResult 			: 	ITcVnImage;
+	ipImageResultDisp 		:	ITcVnDisplayableImage;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[eState := fbCamera.GetState();
+hr := S_OK;
+
+IF eState = TCVN_CS_ERROR THEN // If state is in error, attempt reset
+	hr := fbCamera.Reset();
+ELSIF eState < TCVN_CS_ACQUIRING THEN
+	hr := fbCamera.StartAcquisition();
+ELSIF eState = TCVN_CS_ACQUIRING THEN
+	hr := fbCamera.GetCurrentImage(ipImageIn);
+	
+	// Check if image was successfully recieved
+	IF SUCCEEDED(hr) AND ipImageIn <> 0 THEN
+		// Color Detection
+	
+		// Create images
+		hr := F_VN_ConvertColorSpace(ipImageIn, ipImageWork,TCVN_CST_BAYER_RG_TO_RGB, hr);
+		hr := F_VN_CopyIntoDisplayableImage(ipImageWork, ipImageWorkDisp, hr);
+		
+		// Copy our work image into final image for later use during contour drawing
+		// hr := F_VN_CopyImage(ipImageWork, ipImageResult, hr);
+	
+		// Increase contrast by converting red to white and everything else to black
+		hr := F_VN_CheckColorRange(ipImageWork, ipImageColorMap, aColorLow_Red, aColorHigh_Red, hr);
+		hr := F_VN_CopyIntoDisplayableImage(ipImageColorMap, ipImageColorMapDisp,hr);
+		
+		// ------------------------------------------- //
+	END_IF
+END_IF]]></ST>
+    </Implementation>
+    <LineIds Name="BasicVision">
+      <LineId Id="32" Count="26" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

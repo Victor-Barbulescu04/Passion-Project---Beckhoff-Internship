@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">
+  <POU Name="MAIN" Id="{82899c5e-3dbe-4415-8592-db38cca79af8}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR
+	// Close hand signal from output of C6032
+	bServoClosedSignal AT %I*	:	BOOL;
+	
+
+	// PWM Controls
+	iPWMOutput AT %Q*			:	UINT;
+	iPWMPeriod AT %Q*			:	UINT;
+
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[iPWMPeriod := 10000;
+IF bServoClosedSignal THEN
+	iPWMOutput := 9000;
+ELSE
+	iPWMOutput := 3300;
+END_IF]]></ST>
+    </Implementation>
+    <LineIds Name="MAIN">
+      <LineId Id="103" Count="0" />
+      <LineId Id="32" Count="0" />
+      <LineId Id="101" Count="0" />
+      <LineId Id="34" Count="0" />
+      <LineId Id="38" Count="0" />
+      <LineId Id="35" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

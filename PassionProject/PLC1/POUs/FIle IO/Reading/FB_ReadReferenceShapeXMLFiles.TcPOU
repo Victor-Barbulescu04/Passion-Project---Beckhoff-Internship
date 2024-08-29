@@ -1,0 +1,105 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.12">
+  <POU Name="FB_ReadReferenceShapeXMLFiles" Id="{eac1976e-5c36-46b5-82a0-e1640e2dd5a2}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_ReadReferenceShapeXMLFiles
+
+VAR_INPUT
+END_VAR
+
+VAR_OUTPUT
+	ipReference_Triangle	: 	ITcVnContainer;		// Destination container for our triangle	
+	ipReference_Circle		: 	ITcVnContainer;		// Destination container for our circle
+	ipReference_Square		: 	ITcVnContainer;		// Destination container for our square
+	bAllFilesLoaded			:	BOOL := FALSE;		// Triangle, Circle, and Square files are all loaded
+END_VAR
+
+VAR
+	fbReadContainer			: 	FB_VN_ReadContainer;// Reads container and compares it to reference
+	
+	bTriangleReferenceLoaded: 	BOOL := FALSE;		// Triangle file is loaded
+	bCircleReferenceLoaded	: 	BOOL := FALSE;		// Circle file is loaded		
+	bSquareReferenceLoaded	: 	BOOL := FALSE;		// Square file is loaded
+
+	sTriangleFilePath		: 	STRING(256) := 'C:\Users\Administrator\Documents\Vision\Shapes\ContourTemplates\Original\triangle.xml';		// File path to reference triangle on target system
+	sCircleFilePath			: 	STRING(256) := 'C:\Users\Administrator\Documents\Vision\Shapes\ContourTemplates\Original\circle.xml';		// File path to reference circle on target system
+	sSquareFilePath			: 	STRING(256) := 'C:\Users\Administrator\Documents\Vision\Shapes\ContourTemplates\Original\rectangle.xml';	// File path to reference square on target system
+	
+	nTriangleReadId			: 	INT := 0;
+	nCircleReadId			: 	INT := 0;
+	nSquareReadId			: 	INT := 0;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// Read Triangle
+IF NOT bTriangleReferenceLoaded THEN
+	fbReadContainer(
+		sFilePath:= sTriangleFilePath, 
+		ipDestContainer:= ipReference_Triangle, 
+		nDestTypeGuid:= , 
+		bRead:= TRUE, 
+		nTimeout:= T#5S, 
+	);
+	
+	IF NOT fbReadContainer.bBusy THEN
+		IF nTriangleReadId >= 2 THEN
+			bTriangleReferenceLoaded := TRUE;
+		ELSE
+			nTriangleReadId := nTriangleReadId + 1;
+			fbReadContainer(sFilePath := sTriangleFilePath, bRead := FALSE);
+		END_IF
+	END_IF
+END_IF
+
+// Read Circle
+IF NOT bCircleReferenceLoaded THEN
+	fbReadContainer(
+		sFilePath:= sCircleFilePath, 
+		ipDestContainer:= ipReference_Circle, 
+		nDestTypeGuid:= , 
+		bRead:= TRUE, 
+		nTimeout:= T#5S, 
+	);
+	
+	IF NOT fbReadContainer.bBusy THEN
+		IF nCircleReadId >= 2 THEN
+			bCircleReferenceLoaded := TRUE;
+		ELSE
+			nCircleReadId := nCircleReadId + 1;
+			fbReadContainer(sFilePath := sCircleFilePath, bRead := FALSE);
+		END_IF
+	END_IF
+END_IF
+
+// Read Square
+IF NOT bSquareReferenceLoaded THEN
+	fbReadContainer(
+		sFilePath:= sSquareFilePath, 
+		ipDestContainer:= ipReference_Square, 
+		nDestTypeGuid:= , 
+		bRead:= TRUE, 
+		nTimeout:= T#5S, 
+	);
+	
+	IF NOT fbReadContainer.bBusy THEN
+		IF nSquareReadId >= 2 THEN
+			bSquareReferenceLoaded := TRUE;
+		ELSE
+			nSquareReadId := nSquareReadId + 1;
+			fbReadContainer(sFilePath := sSquareFilePath, bRead := FALSE);
+		END_IF
+	END_IF
+END_IF
+
+IF bTriangleReferenceLoaded AND bSquareReferenceLoaded AND bCircleReferenceLoaded THEN
+	bAllFilesLoaded := TRUE;
+END_IF]]></ST>
+    </Implementation>
+    <LineIds Name="FB_ReadReferenceShapeXMLFiles">
+      <LineId Id="31" Count="57" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="92" Count="0" />
+      <LineId Id="91" Count="0" />
+      <LineId Id="93" Count="1" />
+    </LineIds>
+  </POU>
+</TcPlcObject>
